@@ -244,7 +244,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         recordConversion(fileType === 'image' || fileType === 'video' ? 'cbz' : fileType).catch(() => {})
       } catch (err) {
         console.error(`Error converting ${file.name}:`, err)
-        const fallbackExtension = fileType === 'image' && options.is2bit ? '.xtch' : '.xtc'
+        const fallbackExtension = options.is2bit ? '.xtch' : '.xtc'
         // Store error result
         await addResult({
           name: file.name.replace(/\.[^/.]+$/i, fallbackExtension),

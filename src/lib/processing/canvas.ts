@@ -89,6 +89,8 @@ export function resizeWithPadding(
   result.width = targetWidth;
   result.height = targetHeight;
   const ctx = result.getContext('2d')!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   // Fill with padding color (white by default)
   ctx.fillStyle = `rgb(${padColor}, ${padColor}, ${padColor})`;

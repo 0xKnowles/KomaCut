@@ -52,7 +52,7 @@ function buildOverviewPage(
     ? resizeWithPadding(canvas, 255, targetWidth, targetHeight)
     : resizeWithPadding(rotateCanvas(canvas, landscapeRotation), 255, targetWidth, targetHeight)
 
-  applyDithering(overviewCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering)
+  applyDithering(overviewCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
   return {
     name: `${String(pageNum).padStart(4, '0')}_1_overview_${options.pageOverview}.png`,
@@ -187,6 +187,8 @@ function applyImageMode(
   result.width = targetWidth
   result.height = targetHeight
   const ctx = result.getContext('2d')!
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
 
   if (imageMode === 'fill') {
     ctx.drawImage(sourceCanvas, 0, 0, targetWidth, targetHeight)
@@ -266,16 +268,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   })
 }
 
-function encodeCanvasPage(page: ProcessedPage): EncodedPage {
-  const ctx = page.canvas.getContext('2d')!
-  const imageData = ctx.getImageData(0, 0, page.canvas.width, page.canvas.height)
-  return {
-    name: page.name,
-    xtg: imageDataToXtg(imageData)
-  }
-}
-
-function encodeImageCanvasPage(page: ProcessedPage, is2bit: boolean): EncodedPage {
+function encodeCanvasPage(page: ProcessedPage, is2bit = false): EncodedPage {
   const ctx = page.canvas.getContext('2d')!
   const imageData = ctx.getImageData(0, 0, page.canvas.width, page.canvas.height)
   return {
@@ -289,7 +282,8 @@ async function finalizeConversionResult(
   encodedPages: EncodedPage[],
   mappingCtx: PageMappingContext,
   metadata: BookMetadata,
-  sampledPreviews: string[]
+  sampledPreviews: string[],
+  is2bit = false
 ): Promise<ConversionResult> {
   encodedPages.sort((a, b) => a.name.localeCompare(b.name))
 
@@ -297,10 +291,10 @@ async function finalizeConversionResult(
     metadata.toc = adjustTocForMapping(metadata.toc, mappingCtx)
   }
 
-  const xtcData = await buildXtcFromXtgPages(encodedPages.map((page) => page.xtg), { metadata })
+  const xtcData = await buildXtcFromXtgPages(encodedPages.map((page) => page.xtg), { metadata, is2bit })
 
   return {
-    name: outputName,
+    name: is2bit ? outputName.replace(/\.xtc$/i, '.xtch') : outputName,
     data: xtcData,
     size: xtcData.byteLength,
     pageCount: encodedPages.length,
@@ -381,7 +375,7 @@ async function processArchiveSourcePages(
 
       if (pageResults.length === 0) {
         const pages = await processImage(imgBlob, pageNum, pageOptions)
-        pageResults = pages.map(encodeCanvasPage)
+        pageResults = pages.map((page) => encodeCanvasPage(page, pageOptions.is2bit))
 
         if (includePreview && pages.length > 0 && pages[0].canvas) {
           const previewDataUrl = pages[0].canvas.toDataURL('image/jpeg', PREVIEW_JPEG_QUALITY)
@@ -507,7 +501,8 @@ export async function convertCbzToXtc(
     encodedPages,
     mappingCtx,
     metadata,
-    sampledPreviews
+    sampledPreviews,
+    options.is2bit
   )
 }
 
@@ -591,7 +586,8 @@ export async function convertCbrToXtc(
     encodedPages,
     mappingCtx,
     metadata,
-    sampledPreviews
+    sampledPreviews,
+    options.is2bit
   )
 }
 
@@ -619,13 +615,13 @@ export async function convertImageToXtc(
   const imagePages = await processImage(file, 1, {
     ...options,
     splitMode: 'nosplit'
-  }, options.is2bit)
+  })
 
   if (imagePages.length === 0) {
     throw new Error('Failed to decode image')
   }
 
-  const encodedPages = imagePages.map((page) => encodeImageCanvasPage(page, options.is2bit))
+  const encodedPages = imagePages.map((page) => encodeCanvasPage(page, options.is2bit))
 
   let previewUrl: string | null = null
   const sampledPreviews: string[] = []
@@ -745,7 +741,7 @@ export async function convertVideoToXtc(
       captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height)
 
       const pages = processCanvasAsImage(captureCanvas, i + 1, frameOptions)
-      encodedPages.push(...pages.map(encodeCanvasPage))
+      encodedPages.push(...pages.map((page) => encodeCanvasPage(page, frameOptions.is2bit)))
       mappingCtx.addOriginalPage(i + 1, pages.length)
 
       const includePreview = sampledPreviews.length < MAX_STORED_PREVIEWS &&
@@ -764,7 +760,8 @@ export async function convertVideoToXtc(
       encodedPages,
       mappingCtx,
       { toc: [] },
-      sampledPreviews
+      sampledPreviews,
+      options.is2bit
     )
   } finally {
     URL.revokeObjectURL(url)
@@ -812,7 +809,7 @@ async function convertPdfToXtc(
     }).promise
 
     const pages = processCanvasAsImage(canvas, i, options)
-    encodedPages.push(...pages.map(encodeCanvasPage))
+    encodedPages.push(...pages.map((page) => encodeCanvasPage(page, options.is2bit)))
     mappingCtx.addOriginalPage(i, pages.length)
 
     const includePreview = sampledPreviews.length < MAX_STORED_PREVIEWS &&
@@ -835,7 +832,8 @@ async function convertPdfToXtc(
     encodedPages,
     mappingCtx,
     metadata,
-    sampledPreviews
+    sampledPreviews,
+    options.is2bit
   )
 }
 
@@ -880,7 +878,7 @@ function processCanvasAsImage(
       options.imageMode,
       255
     )
-    applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering)
+    applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_page.png`,
@@ -903,7 +901,7 @@ function processCanvasAsImage(
         const letter = String.fromCharCode(97 + idx)
         const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h, landscapeRotation)
         const finalCanvas = resizeWithPadding(pageCanvas, 255, targetWidth, targetHeight)
-        applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering)
+        applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
         results.push({
           name: `${String(pageNum).padStart(4, '0')}_3_${letter}.png`,
@@ -918,7 +916,7 @@ function processCanvasAsImage(
         const trimmedSegment = trimCanvasToContent(segmentCanvas)
         const pageCanvas = rotateCanvas(trimmedSegment, landscapeRotation)
         const finalCanvas = resizeWithPadding(pageCanvas, 255, targetWidth, targetHeight)
-        applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering)
+        applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
         results.push({
           name: `${String(pageNum).padStart(4, '0')}_4_${letter}.png`,
@@ -930,7 +928,7 @@ function processCanvasAsImage(
 
       const topCanvas = extractAndRotate(canvas, 0, 0, width, halfHeight, landscapeRotation)
       const topFinal = resizeWithPadding(topCanvas, 255, targetWidth, targetHeight)
-      applyDithering(topFinal.getContext('2d')!, targetWidth, targetHeight, options.dithering)
+      applyDithering(topFinal.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
       results.push({
         name: `${String(pageNum).padStart(4, '0')}_2_a.png`,
         canvas: topFinal
@@ -938,7 +936,7 @@ function processCanvasAsImage(
 
       const bottomCanvas = extractAndRotate(canvas, 0, halfHeight, width, halfHeight, landscapeRotation)
       const bottomFinal = resizeWithPadding(bottomCanvas, 255, targetWidth, targetHeight)
-      applyDithering(bottomFinal.getContext('2d')!, targetWidth, targetHeight, options.dithering)
+      applyDithering(bottomFinal.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
       results.push({
         name: `${String(pageNum).padStart(4, '0')}_2_b.png`,
         canvas: bottomFinal
@@ -947,7 +945,7 @@ function processCanvasAsImage(
   } else {
     const rotatedCanvas = rotateCanvas(canvas, landscapeRotation)
     const finalCanvas = resizeWithPadding(rotatedCanvas, 255, targetWidth, targetHeight)
-    applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering)
+    applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_spread.png`,
@@ -964,8 +962,7 @@ function processCanvasAsImage(
 async function processImage(
   imgBlob: Blob,
   pageNum: number,
-  options: ConversionOptions,
-  is2bit = false
+  options: ConversionOptions
 ): Promise<ProcessedPage[]> {
   return new Promise((resolve) => {
     const img = new Image()
@@ -973,7 +970,7 @@ async function processImage(
 
     img.onload = () => {
       URL.revokeObjectURL(objectUrl)
-      const pages = processLoadedImage(img, pageNum, options, is2bit)
+      const pages = processLoadedImage(img, pageNum, options)
       resolve(pages)
     }
     img.onerror = () => {
@@ -991,8 +988,7 @@ async function processImage(
 function processLoadedImage(
   img: HTMLImageElement,
   pageNum: number,
-  options: ConversionOptions,
-  is2bit = false
+  options: ConversionOptions
 ): ProcessedPage[] {
   const { width: targetWidth, height: targetHeight } = getOutputDimensions(options)
   const results: ProcessedPage[] = []
@@ -1027,7 +1023,7 @@ function processLoadedImage(
       options.imageMode,
       255
     )
-    applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, is2bit)
+    applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_page.png`,
@@ -1050,7 +1046,7 @@ function processLoadedImage(
         const letter = String.fromCharCode(97 + idx)
         const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h, landscapeRotation)
         const finalCanvas = resizeWithPadding(pageCanvas, 255, targetWidth, targetHeight)
-        applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, is2bit)
+        applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
         results.push({
           name: `${String(pageNum).padStart(4, '0')}_3_${letter}.png`,
@@ -1065,7 +1061,7 @@ function processLoadedImage(
         const trimmedSegment = trimCanvasToContent(segmentCanvas)
         const pageCanvas = rotateCanvas(trimmedSegment, landscapeRotation)
         const finalCanvas = resizeWithPadding(pageCanvas, 255, targetWidth, targetHeight)
-        applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, is2bit)
+        applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
         results.push({
           name: `${String(pageNum).padStart(4, '0')}_4_${letter}.png`,
@@ -1077,7 +1073,7 @@ function processLoadedImage(
 
       const topCanvas = extractAndRotate(canvas, 0, 0, width, halfHeight, landscapeRotation)
       const topFinal = resizeWithPadding(topCanvas, 255, targetWidth, targetHeight)
-      applyDithering(topFinal.getContext('2d')!, targetWidth, targetHeight, options.dithering, is2bit)
+      applyDithering(topFinal.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
       results.push({
         name: `${String(pageNum).padStart(4, '0')}_2_a.png`,
         canvas: topFinal
@@ -1085,7 +1081,7 @@ function processLoadedImage(
 
       const bottomCanvas = extractAndRotate(canvas, 0, halfHeight, width, halfHeight, landscapeRotation)
       const bottomFinal = resizeWithPadding(bottomCanvas, 255, targetWidth, targetHeight)
-      applyDithering(bottomFinal.getContext('2d')!, targetWidth, targetHeight, options.dithering, is2bit)
+      applyDithering(bottomFinal.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
       results.push({
         name: `${String(pageNum).padStart(4, '0')}_2_b.png`,
         canvas: bottomFinal
@@ -1094,7 +1090,7 @@ function processLoadedImage(
   } else {
     const rotatedCanvas = rotateCanvas(canvas, landscapeRotation)
     const finalCanvas = resizeWithPadding(rotatedCanvas, 255, targetWidth, targetHeight)
-    applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, is2bit)
+    applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_spread.png`,
