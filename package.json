@@ -16,8 +16,6 @@
     "@hono/vite-dev-server": "^0.24.1",
     "@tanstack/react-router": "^1.170.15",
     "axios": "^1.17.0",
-    "baseline-browser-mapping": "^2.10.35",
-    "caniuse-lite": "^1.0.30001797",
     "hono": "^4.12.25",
     "jszip": "^3.10.1",
     "node-unrar-js": "^2.0.2",

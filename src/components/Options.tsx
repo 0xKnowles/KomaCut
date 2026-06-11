@@ -25,7 +25,7 @@ export function Options({ options, onChange, fileType = 'cbz' }: OptionsProps) {
         </div>
 
         <div className="device-control">
-          <div className="device-toggle" role="group" aria-label="Target device">
+          <fieldset className="device-toggle" aria-label="Target device">
             <button
               type="button"
               className={options.device === 'X4' ? 'active' : ''}
@@ -44,7 +44,7 @@ export function Options({ options, onChange, fileType = 'cbz' }: OptionsProps) {
             >
               [X3]
             </button>
-          </div>
+          </fieldset>
           {options.device === 'X3' && (
             <p className="device-warning">WARNING: Select only if you are using the X3 device.</p>
           )}

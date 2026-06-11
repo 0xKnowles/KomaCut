@@ -36,7 +36,7 @@ export function parsePageRanges(input: string, totalPages: number): PageRange[] 
   const parts = input.split(',').map(s => s.trim()).filter(s => s.length > 0)
 
   for (const part of parts) {
-    if (part.includes('-')) {
+    if (/-/.test(part)) {
       const [startStr, endStr] = part.split('-').map(s => s.trim())
       const start = parseInt(startStr, 10)
       const end = parseInt(endStr, 10)

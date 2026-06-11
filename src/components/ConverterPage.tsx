@@ -81,6 +81,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
 
   // Check for transferred files on mount
   useEffect(() => {
+    let noticeTimer: ReturnType<typeof setTimeout> | null = null
     const pending = consumePendingFiles()
     if (pending.length > 0) {
       // Filter files matching this converter's type
@@ -104,7 +105,13 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
           `${matchingFiles.length} file${matchingFiles.length > 1 ? 's' : ''} received from merge/split`
         )
         // Clear notice after 5 seconds
-        setTimeout(() => setTransferNotice(null), 5000)
+        noticeTimer = setTimeout(() => setTransferNotice(null), 5000)
+      }
+    }
+
+    return () => {
+      if (noticeTimer !== null) {
+        clearTimeout(noticeTimer)
       }
     }
   }, [fileType])
@@ -121,7 +128,10 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
   const pendingPreviewRef = useRef<string | undefined>(undefined)
   const progressTimerRef = useRef<number | null>(null)
   const lastProgressFlushRef = useRef(0)
-  const previewCacheRef = useRef<Map<string, string[]>>(new Map())
+  const previewCacheRef = useRef<Map<string, string[]> | null>(null)
+  if (previewCacheRef.current === null) {
+    previewCacheRef.current = new Map()
+  }
   const [options, setOptions] = useState<ConversionOptions>({
     device: 'X4',
     splitMode: (fileType === 'image' || fileType === 'video') ? 'nosplit' : 'overlap',
@@ -276,7 +286,8 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     try {
       setPreviewError(null)
 
-      const cached = previewCacheRef.current.get(result.id)
+      const previewCache = previewCacheRef.current
+      const cached = previewCache.get(result.id)
       if (cached && cached.length > 0) {
         setViewerPages(cached)
         return
@@ -284,7 +295,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
 
       const images = await getPreviewImages(result)
       if (images.length > 0) {
-        previewCacheRef.current.set(result.id, images)
+        previewCache.set(result.id, images)
         setViewerPages(images)
         return
       }
@@ -300,7 +311,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         : undefined
       const canvases = await extractXtcPages(data, decodeLimit)
       const decodedImages = canvases.map((canvas) => canvas.toDataURL('image/png'))
-      previewCacheRef.current.set(result.id, decodedImages)
+      previewCache.set(result.id, decodedImages)
       setViewerPages(decodedImages)
     } catch (err) {
       console.error('Preview failed:', err)
@@ -422,10 +433,10 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
             Recovered {recoveredCount} file{recoveredCount > 1 ? 's' : ''} from previous session
           </p>
           <div className="recovered-actions">
-            <button onClick={dismissRecovered} className="btn-dismiss">
+            <button type="button" onClick={dismissRecovered} className="btn-dismiss">
               Dismiss
             </button>
-            <button onClick={clearAll} className="btn-clear-all">
+            <button type="button" onClick={clearAll} className="btn-clear-all">
               Clear All
             </button>
           </div>

@@ -22,6 +22,7 @@ const PERF_PIPELINE_V2 = true
 const PREVIEW_EVERY_N_PAGES = 5
 const MAX_STORED_PREVIEWS = 12
 const PREVIEW_JPEG_QUALITY = 0.55
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'])
 
 interface ProcessedPage {
   name: string
@@ -353,7 +354,13 @@ async function processArchiveSourcePages(
           pageResults = workerPages.map((page) => ({ name: page.name, xtg: page.xtg }))
 
           if (includePreview) {
-            const previewBytes = workerPages.find((page) => page.previewJpeg)?.previewJpeg
+            let previewBytes: Uint8Array | undefined
+            for (const page of workerPages) {
+              if (page.previewJpeg) {
+                previewBytes = page.previewJpeg
+                break
+              }
+            }
             if (previewBytes) {
               const previewBlob = new Blob([previewBytes], { type: 'image/jpeg' })
               if (pageOptions.showProgressPreview) {
@@ -442,7 +449,7 @@ export async function convertToXtc(
 /**
  * Convert a CBZ file to XTC format
  */
-export async function convertCbzToXtc(
+async function convertCbzToXtc(
   file: File,
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void
@@ -450,7 +457,6 @@ export async function convertCbzToXtc(
   const zip = await JSZip.loadAsync(file)
 
   const imageFiles: Array<{ path: string; entry: any; originalPage: number }> = []
-  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
   let comicInfoEntry: any = null
 
   zip.forEach((relativePath: string, zipEntry: any) => {
@@ -458,7 +464,7 @@ export async function convertCbzToXtc(
     if (relativePath.toLowerCase().startsWith('__macos')) return
 
     const ext = relativePath.toLowerCase().substring(relativePath.lastIndexOf('.'))
-    if (imageExtensions.includes(ext)) {
+    if (IMAGE_EXTENSIONS.has(ext)) {
       imageFiles.push({ path: relativePath, entry: zipEntry, originalPage: 0 })
     }
 
@@ -521,16 +527,17 @@ async function loadUnrarWasm(): Promise<ArrayBuffer> {
 /**
  * Convert a CBR file to XTC format
  */
-export async function convertCbrToXtc(
+async function convertCbrToXtc(
   file: File,
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void
 ): Promise<ConversionResult> {
-  const wasmBinary = await loadUnrarWasm()
-  const arrayBuffer = await file.arrayBuffer()
+  const [wasmBinary, arrayBuffer] = await Promise.all([
+    loadUnrarWasm(),
+    file.arrayBuffer(),
+  ])
   const extractor = await createExtractorFromData({ data: arrayBuffer, wasmBinary })
 
-  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
   const imageFiles: Array<{ path: string; data: Uint8Array; originalPage: number }> = []
   let comicInfoContent: string | null = null
 
@@ -542,7 +549,7 @@ export async function convertCbrToXtc(
     if (path.toLowerCase().startsWith('__macos')) continue
 
     const ext = path.toLowerCase().substring(path.lastIndexOf('.'))
-    if (imageExtensions.includes(ext) && extractedFile.extraction) {
+    if (IMAGE_EXTENSIONS.has(ext) && extractedFile.extraction) {
       imageFiles.push({ path, data: extractedFile.extraction, originalPage: 0 })
     }
 
@@ -607,7 +614,7 @@ function getImageOutputName(fileName: string, is2bit: boolean): string {
 /**
  * Convert a single image file to XTC.
  */
-export async function convertImageToXtc(
+async function convertImageToXtc(
   file: File,
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void
@@ -698,7 +705,7 @@ async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
 /**
  * Convert video frames to XTC.
  */
-export async function convertVideoToXtc(
+async function convertVideoToXtc(
   file: File,
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void

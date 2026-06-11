@@ -10,6 +10,8 @@ import { TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
 export type FileType = 'cbz' | 'cbr' | 'pdf' | 'xtc' | 'unknown'
 export type OutputFormat = 'xtc' | 'cbz' | 'pdf'
 
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'])
+
 export interface MergeResult {
   name: string
   data: ArrayBuffer
@@ -96,13 +98,12 @@ export async function mergeFiles(
 /**
  * Merge CBZ files
  */
-export async function mergeCbzFiles(
+async function mergeCbzFiles(
   files: File[],
   outputFormat: OutputFormat,
   onProgress: (progress: MergeProgress) => void
 ): Promise<MergeResult> {
   const allImages: { name: string; blob: Blob }[] = []
-  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
   let globalIndex = 0
 
   for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
@@ -122,7 +123,7 @@ export async function mergeCbzFiles(
       if (relativePath.toLowerCase().startsWith('__macos')) return
 
       const ext = relativePath.toLowerCase().substring(relativePath.lastIndexOf('.'))
-      if (imageExtensions.includes(ext)) {
+      if (IMAGE_EXTENSIONS.has(ext)) {
         imageFiles.push({ path: relativePath, entry: zipEntry })
       }
     })
@@ -190,7 +191,7 @@ export async function mergeCbzFiles(
 /**
  * Merge PDF files
  */
-export async function mergePdfFiles(
+async function mergePdfFiles(
   files: File[],
   outputFormat: OutputFormat,
   onProgress: (progress: MergeProgress) => void
@@ -314,7 +315,7 @@ export async function mergePdfFiles(
 /**
  * Merge XTC files
  */
-export async function mergeXtcFiles(
+async function mergeXtcFiles(
   files: File[],
   outputFormat: OutputFormat,
   onProgress: (progress: MergeProgress) => void
