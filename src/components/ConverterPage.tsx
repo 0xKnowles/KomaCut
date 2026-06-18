@@ -19,6 +19,11 @@ interface ConverterPageProps {
   notice?: string
 }
 
+interface FileSelectionState {
+  selectedFiles: File[]
+  transferNotice: string | null
+}
+
 const MAX_FALLBACK_PREVIEW_PAGES = 200
 const PROGRESS_UPDATE_INTERVAL_MS = 120
 
@@ -62,8 +67,10 @@ function getUniqueZipEntryName(fileName: string, usedNames: Set<string>): string
 }
 
 export function ConverterPage({ fileType, notice }: ConverterPageProps) {
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
-  const [transferNotice, setTransferNotice] = useState<string | null>(null)
+  const [{ selectedFiles, transferNotice }, setFileSelection] = useState<FileSelectionState>({
+    selectedFiles: [],
+    transferNotice: null,
+  })
 
   // Use IndexedDB-backed storage for results
   const {
@@ -100,12 +107,15 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         return name.endsWith('.cbz') || name.endsWith('.cbr')
       })
       if (matchingFiles.length > 0) {
-        setSelectedFiles(matchingFiles)
-        setTransferNotice(
-          `${matchingFiles.length} file${matchingFiles.length > 1 ? 's' : ''} received from merge/split`
-        )
+        const message = `${matchingFiles.length} file${matchingFiles.length > 1 ? 's' : ''} received from merge/split`
+        setFileSelection({
+          selectedFiles: matchingFiles,
+          transferNotice: message,
+        })
         // Clear notice after 5 seconds
-        noticeTimer = setTimeout(() => setTransferNotice(null), 5000)
+        noticeTimer = setTimeout(() => {
+          setFileSelection((prev) => ({ ...prev, transferNotice: null }))
+        }, 5000)
       }
     }
 
@@ -149,12 +159,33 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     videoFps: 1.0,
   })
 
+  const clearProgressTimer = useCallback(() => {
+    if (progressTimerRef.current !== null) {
+      clearTimeout(progressTimerRef.current)
+      progressTimerRef.current = null
+    }
+  }, [])
+
+  const revokeProgressPreview = useCallback(() => {
+    const previewUrl = progressPreviewRef.current
+    if (previewUrl && previewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(previewUrl)
+    }
+    progressPreviewRef.current = null
+  }, [])
+
   const handleFiles = useCallback((files: File[]) => {
-    setSelectedFiles(prev => [...prev, ...files])
+    setFileSelection(prev => ({
+      ...prev,
+      selectedFiles: [...prev.selectedFiles, ...files],
+    }))
   }, [])
 
   const handleRemove = useCallback((index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index))
+    setFileSelection(prev => ({
+      ...prev,
+      selectedFiles: prev.selectedFiles.filter((_, i) => i !== index),
+    }))
   }, [])
 
   const flushProgressUi = useCallback((force = false) => {
@@ -172,22 +203,17 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
       const nextPreview = pendingPreviewRef.current
       pendingPreviewRef.current = undefined
 
-      if (progressPreviewRef.current && progressPreviewRef.current.startsWith('blob:')) {
-        URL.revokeObjectURL(progressPreviewRef.current)
-      }
+      revokeProgressPreview()
       progressPreviewRef.current = nextPreview ?? null
       setPreviewUrl(nextPreview ?? null)
     }
 
     lastProgressFlushRef.current = now
-  }, [])
+  }, [revokeProgressPreview])
 
   const scheduleProgressUiFlush = useCallback((force = false) => {
     if (force) {
-      if (progressTimerRef.current !== null) {
-        clearTimeout(progressTimerRef.current)
-        progressTimerRef.current = null
-      }
+      clearProgressTimer()
       flushProgressUi(true)
       return
     }
@@ -202,7 +228,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
       progressTimerRef.current = null
       flushProgressUi(true)
     }, delay)
-  }, [flushProgressUi])
+  }, [clearProgressTimer, flushProgressUi])
 
   const handleConvert = useCallback(async () => {
     if (selectedFiles.length === 0) return
@@ -212,14 +238,8 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     setPreviewError(null)
     setProgress(0)
     setProgressText('Processing...')
-    if (progressPreviewRef.current && progressPreviewRef.current.startsWith('blob:')) {
-      URL.revokeObjectURL(progressPreviewRef.current)
-      progressPreviewRef.current = null
-    }
-    if (progressTimerRef.current !== null) {
-      clearTimeout(progressTimerRef.current)
-      progressTimerRef.current = null
-    }
+    revokeProgressPreview()
+    clearProgressTimer()
     pendingProgressRef.current = null
     pendingPreviewRef.current = undefined
     lastProgressFlushRef.current = performance.now()
@@ -266,21 +286,24 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
       scheduleProgressUiFlush(true)
     }
 
-    if (progressTimerRef.current !== null) {
-      clearTimeout(progressTimerRef.current)
-      progressTimerRef.current = null
-    }
+    clearProgressTimer()
     pendingProgressRef.current = null
     pendingPreviewRef.current = undefined
     setProgress(1)
     setProgressText('Complete')
-    if (progressPreviewRef.current && progressPreviewRef.current.startsWith('blob:')) {
-      URL.revokeObjectURL(progressPreviewRef.current)
-      progressPreviewRef.current = null
-    }
+    revokeProgressPreview()
     setPreviewUrl(null)
     setIsConverting(false)
-  }, [selectedFiles, fileType, options, addResult, clearSession, scheduleProgressUiFlush])
+  }, [
+    selectedFiles,
+    fileType,
+    options,
+    addResult,
+    clearSession,
+    clearProgressTimer,
+    revokeProgressPreview,
+    scheduleProgressUiFlush,
+  ])
 
   const handlePreview = useCallback(async (result: StoredResult) => {
     try {
@@ -350,8 +373,14 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
       const usedNames = new Set<string>()
       let addedCount = 0
 
-      for (const result of successfulResults) {
-        const data = await getResultData(result)
+      const resultData = await Promise.all(
+        successfulResults.map(async (result) => ({
+          result,
+          data: await getResultData(result),
+        }))
+      )
+
+      for (const { result, data } of resultData) {
         if (!data || data.byteLength === 0) {
           console.warn(`Skipping ${result.name}: no data found`)
           continue
@@ -394,14 +423,10 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
 
   useEffect(() => {
     return () => {
-      if (progressTimerRef.current !== null) {
-        clearTimeout(progressTimerRef.current)
-      }
-      if (progressPreviewRef.current && progressPreviewRef.current.startsWith('blob:')) {
-        URL.revokeObjectURL(progressPreviewRef.current)
-      }
+      clearProgressTimer()
+      revokeProgressPreview()
     }
-  }, [])
+  }, [clearProgressTimer, revokeProgressPreview])
 
   // Combine current and recovered results for display
   const allResults = [...recoveredResults, ...results]

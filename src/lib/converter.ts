@@ -13,7 +13,7 @@ import { parseComicInfo } from './metadata/comicinfo'
 import { PageMappingContext, adjustTocForMapping } from './page-mapping'
 import { ConvertWorkerPool, isWorkerPipelineSupported } from './conversion/worker-pool'
 import { loadPdfDocument } from './pdfjs'
-import type { BookMetadata } from './metadata/types'
+import type { BookMetadata } from './metadata'
 import type { ConversionOptions, ConversionResult } from './conversion/types'
 
 export type { ConversionOptions, ConversionResult } from './conversion/types'
@@ -39,6 +39,12 @@ interface CropRect {
   y: number
   width: number
   height: number
+}
+
+interface LoadedVideoMetadata {
+  width: number
+  height: number
+  duration: number
 }
 
 function buildOverviewPage(
@@ -681,6 +687,23 @@ async function waitForVideoMetadata(video: HTMLVideoElement): Promise<void> {
   })
 }
 
+function readLoadedVideoMetadata(video: HTMLVideoElement): LoadedVideoMetadata {
+  if (!Number.isFinite(video.videoWidth) || !Number.isFinite(video.videoHeight) ||
+      video.videoWidth <= 0 || video.videoHeight <= 0) {
+    throw new Error('Invalid video dimensions')
+  }
+
+  return {
+    width: video.videoWidth,
+    height: video.videoHeight,
+    duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0,
+  }
+}
+
+function loadVideoMetadata(video: HTMLVideoElement): Promise<LoadedVideoMetadata> {
+  return waitForVideoMetadata(video).then(() => readLoadedVideoMetadata(video))
+}
+
 async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const onSeeked = () => {
@@ -718,20 +741,15 @@ async function convertVideoToXtc(
   video.src = url
 
   try {
-    await waitForVideoMetadata(video)
-
-    if (!Number.isFinite(video.videoWidth) || !Number.isFinite(video.videoHeight) ||
-        video.videoWidth <= 0 || video.videoHeight <= 0) {
-      throw new Error('Invalid video dimensions')
-    }
+    const videoMetadata = await loadVideoMetadata(video)
 
     const fps = Math.max(0.1, Math.min(10, Number.isFinite(options.videoFps) ? options.videoFps : 1))
-    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0
+    const duration = videoMetadata.duration
     const frameCount = duration > 0 ? Math.max(1, Math.floor(duration * fps)) : 1
 
     const captureCanvas = document.createElement('canvas')
-    captureCanvas.width = video.videoWidth
-    captureCanvas.height = video.videoHeight
+    captureCanvas.width = videoMetadata.width
+    captureCanvas.height = videoMetadata.height
     const captureCtx = captureCanvas.getContext('2d', { willReadFrequently: true })!
 
     const encodedPages: EncodedPage[] = []

@@ -4,7 +4,7 @@ import { Dropzone } from '../components/Dropzone'
 import { Viewer } from '../components/Viewer'
 import { parseXtcFile, type ParsedXtc, extractXtcPages } from '../lib/xtc-reader'
 import { buildXtcFromBuffers } from '../lib/xtc-format'
-import type { BookMetadata, TocEntry } from '../lib/metadata/types'
+import type { BookMetadata, TocEntry } from '../lib/metadata'
 
 export const Route = createFileRoute('/metadata')({
   component: MetadataEditor,

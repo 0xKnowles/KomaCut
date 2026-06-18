@@ -14,9 +14,9 @@
   },
   "dependencies": {
     "@hono/vite-dev-server": "^0.24.1",
-    "@tanstack/react-router": "^1.170.15",
-    "axios": "^1.17.0",
-    "hono": "^4.12.25",
+    "@tanstack/react-router": "^1.170.16",
+    "axios": "^1.18.0",
+    "hono": "^4.12.26",
     "jszip": "^3.10.1",
     "node-unrar-js": "^2.0.2",
     "pdf-lib": "^1.17.1",

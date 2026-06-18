@@ -6,6 +6,7 @@ import { buildXtc } from './xtc-format'
 import { extractXtcPages, extractXtcRawPages, parseXtcFile } from './xtc-reader'
 import { loadPdfDocument } from './pdfjs'
 import { TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
+import { mapWithConcurrency } from './concurrency'
 
 export type FileType = 'cbz' | 'cbr' | 'pdf' | 'xtc' | 'unknown'
 export type OutputFormat = 'xtc' | 'cbz' | 'pdf'
@@ -130,23 +131,27 @@ async function mergeCbzFiles(
 
     imageFiles.sort((a, b) => a.path.localeCompare(b.path))
 
-    for (let i = 0; i < imageFiles.length; i++) {
-      const imgFile = imageFiles[i]
+    let completedImages = 0
+    const imageBlobs = await mapWithConcurrency(imageFiles, async (imgFile) => {
       const blob = await imgFile.entry.async('blob')
-      const ext = imgFile.path.substring(imgFile.path.lastIndexOf('.'))
-
-      allImages.push({
-        name: `${String(globalIndex + 1).padStart(5, '0')}${ext}`,
-        blob,
-      })
-      globalIndex++
-
+      completedImages++
       onProgress({
         file: file.name,
         fileIndex: fileIdx,
         totalFiles: files.length,
-        pageProgress: (i + 1) / imageFiles.length,
+        pageProgress: completedImages / imageFiles.length,
       })
+      return { path: imgFile.path, blob }
+    })
+
+    for (const imgFile of imageBlobs) {
+      const ext = imgFile.path.substring(imgFile.path.lastIndexOf('.'))
+
+      allImages.push({
+        name: `${String(globalIndex + 1).padStart(5, '0')}${ext}`,
+        blob: imgFile.blob,
+      })
+      globalIndex++
     }
   }
 
@@ -414,9 +419,8 @@ export async function splitPdf(
 ): Promise<{ data: ArrayBuffer; pageCount: number }[]> {
   const arrayBuffer = await file.arrayBuffer()
   const srcPdf = await PDFDocument.load(arrayBuffer)
-  const results: { data: ArrayBuffer; pageCount: number }[] = []
 
-  for (const range of ranges) {
+  return mapWithConcurrency(ranges, async (range) => {
     const newPdf = await PDFDocument.create()
     // PDF pages are 0-indexed in pdf-lib, but our ranges are 1-indexed
     const pageIndices = []
@@ -428,13 +432,11 @@ export async function splitPdf(
       newPdf.addPage(page)
     }
     const data = await newPdf.save()
-    results.push({
+    return {
       data: data.buffer as ArrayBuffer,
       pageCount: copiedPages.length,
-    })
-  }
-
-  return results
+    }
+  }, 3)
 }
 
 /**
@@ -512,17 +514,15 @@ async function imageBlobsToCanvases(
   blobs: Blob[],
   onProgress: (index: number, total: number, preview?: string) => void
 ): Promise<HTMLCanvasElement[]> {
-  const canvases: HTMLCanvasElement[] = []
-
-  for (let i = 0; i < blobs.length; i++) {
-    const canvas = await blobToCanvas(blobs[i])
+  let completedImages = 0
+  return mapWithConcurrency(blobs, async (blob) => {
+    const canvas = await blobToCanvas(blob)
     const resized = resizeCanvasForXtc(canvas)
-    canvases.push(resized)
 
-    onProgress(i + 1, blobs.length, resized.toDataURL('image/png'))
-  }
-
-  return canvases
+    completedImages++
+    onProgress(completedImages, blobs.length, resized.toDataURL('image/png'))
+    return resized
+  }, 4)
 }
 
 /**
