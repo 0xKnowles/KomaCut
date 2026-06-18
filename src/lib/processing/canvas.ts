@@ -1,6 +1,6 @@
 // Canvas utility functions for rotation and resizing
 
-export const DEVICE_DIMENSIONS = {
+const DEVICE_DIMENSIONS = {
   X4: { width: 480, height: 800 },
   X3: { width: 528, height: 792 }
 } as const;

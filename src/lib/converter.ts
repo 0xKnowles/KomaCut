@@ -13,7 +13,7 @@ import { parseComicInfo } from './metadata/comicinfo'
 import { PageMappingContext, adjustTocForMapping } from './page-mapping'
 import { ConvertWorkerPool, isWorkerPipelineSupported } from './conversion/worker-pool'
 import { loadPdfDocument } from './pdfjs'
-import type { BookMetadata } from './metadata/types'
+import type { BookMetadata } from './metadata'
 import type { ConversionOptions, ConversionResult } from './conversion/types'
 
 export type { ConversionOptions, ConversionResult } from './conversion/types'
@@ -22,6 +22,7 @@ const PERF_PIPELINE_V2 = true
 const PREVIEW_EVERY_N_PAGES = 5
 const MAX_STORED_PREVIEWS = 12
 const PREVIEW_JPEG_QUALITY = 0.55
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'])
 
 interface ProcessedPage {
   name: string
@@ -38,6 +39,12 @@ interface CropRect {
   y: number
   width: number
   height: number
+}
+
+interface LoadedVideoMetadata {
+  width: number
+  height: number
+  duration: number
 }
 
 function buildOverviewPage(
@@ -353,7 +360,13 @@ async function processArchiveSourcePages(
           pageResults = workerPages.map((page) => ({ name: page.name, xtg: page.xtg }))
 
           if (includePreview) {
-            const previewBytes = workerPages.find((page) => page.previewJpeg)?.previewJpeg
+            let previewBytes: Uint8Array | undefined
+            for (const page of workerPages) {
+              if (page.previewJpeg) {
+                previewBytes = page.previewJpeg
+                break
+              }
+            }
             if (previewBytes) {
               const previewBlob = new Blob([previewBytes], { type: 'image/jpeg' })
               if (pageOptions.showProgressPreview) {
@@ -442,7 +455,7 @@ export async function convertToXtc(
 /**
  * Convert a CBZ file to XTC format
  */
-export async function convertCbzToXtc(
+async function convertCbzToXtc(
   file: File,
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void
@@ -450,7 +463,6 @@ export async function convertCbzToXtc(
   const zip = await JSZip.loadAsync(file)
 
   const imageFiles: Array<{ path: string; entry: any; originalPage: number }> = []
-  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
   let comicInfoEntry: any = null
 
   zip.forEach((relativePath: string, zipEntry: any) => {
@@ -458,7 +470,7 @@ export async function convertCbzToXtc(
     if (relativePath.toLowerCase().startsWith('__macos')) return
 
     const ext = relativePath.toLowerCase().substring(relativePath.lastIndexOf('.'))
-    if (imageExtensions.includes(ext)) {
+    if (IMAGE_EXTENSIONS.has(ext)) {
       imageFiles.push({ path: relativePath, entry: zipEntry, originalPage: 0 })
     }
 
@@ -521,16 +533,17 @@ async function loadUnrarWasm(): Promise<ArrayBuffer> {
 /**
  * Convert a CBR file to XTC format
  */
-export async function convertCbrToXtc(
+async function convertCbrToXtc(
   file: File,
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void
 ): Promise<ConversionResult> {
-  const wasmBinary = await loadUnrarWasm()
-  const arrayBuffer = await file.arrayBuffer()
+  const [wasmBinary, arrayBuffer] = await Promise.all([
+    loadUnrarWasm(),
+    file.arrayBuffer(),
+  ])
   const extractor = await createExtractorFromData({ data: arrayBuffer, wasmBinary })
 
-  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
   const imageFiles: Array<{ path: string; data: Uint8Array; originalPage: number }> = []
   let comicInfoContent: string | null = null
 
@@ -542,7 +555,7 @@ export async function convertCbrToXtc(
     if (path.toLowerCase().startsWith('__macos')) continue
 
     const ext = path.toLowerCase().substring(path.lastIndexOf('.'))
-    if (imageExtensions.includes(ext) && extractedFile.extraction) {
+    if (IMAGE_EXTENSIONS.has(ext) && extractedFile.extraction) {
       imageFiles.push({ path, data: extractedFile.extraction, originalPage: 0 })
     }
 
@@ -607,7 +620,7 @@ function getImageOutputName(fileName: string, is2bit: boolean): string {
 /**
  * Convert a single image file to XTC.
  */
-export async function convertImageToXtc(
+async function convertImageToXtc(
   file: File,
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void
@@ -674,6 +687,23 @@ async function waitForVideoMetadata(video: HTMLVideoElement): Promise<void> {
   })
 }
 
+function readLoadedVideoMetadata(video: HTMLVideoElement): LoadedVideoMetadata {
+  if (!Number.isFinite(video.videoWidth) || !Number.isFinite(video.videoHeight) ||
+      video.videoWidth <= 0 || video.videoHeight <= 0) {
+    throw new Error('Invalid video dimensions')
+  }
+
+  return {
+    width: video.videoWidth,
+    height: video.videoHeight,
+    duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0,
+  }
+}
+
+function loadVideoMetadata(video: HTMLVideoElement): Promise<LoadedVideoMetadata> {
+  return waitForVideoMetadata(video).then(() => readLoadedVideoMetadata(video))
+}
+
 async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const onSeeked = () => {
@@ -698,7 +728,7 @@ async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
 /**
  * Convert video frames to XTC.
  */
-export async function convertVideoToXtc(
+async function convertVideoToXtc(
   file: File,
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void
@@ -711,20 +741,15 @@ export async function convertVideoToXtc(
   video.src = url
 
   try {
-    await waitForVideoMetadata(video)
-
-    if (!Number.isFinite(video.videoWidth) || !Number.isFinite(video.videoHeight) ||
-        video.videoWidth <= 0 || video.videoHeight <= 0) {
-      throw new Error('Invalid video dimensions')
-    }
+    const videoMetadata = await loadVideoMetadata(video)
 
     const fps = Math.max(0.1, Math.min(10, Number.isFinite(options.videoFps) ? options.videoFps : 1))
-    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0
+    const duration = videoMetadata.duration
     const frameCount = duration > 0 ? Math.max(1, Math.floor(duration * fps)) : 1
 
     const captureCanvas = document.createElement('canvas')
-    captureCanvas.width = video.videoWidth
-    captureCanvas.height = video.videoHeight
+    captureCanvas.width = videoMetadata.width
+    captureCanvas.height = videoMetadata.height
     const captureCtx = captureCanvas.getContext('2d', { willReadFrequently: true })!
 
     const encodedPages: EncodedPage[] = []
