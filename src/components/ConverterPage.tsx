@@ -13,6 +13,7 @@ import { consumePendingFiles } from '../lib/file-transfer'
 import { useStoredResults, type StoredResult } from '../hooks/useStoredResults'
 import { extractXtcPages } from '../lib/xtc-reader'
 import { normalizeUserErrorMessage } from '../lib/errors'
+import { getDefaultContrast } from '../lib/conversion/defaults'
 
 interface ConverterPageProps {
   fileType: 'cbz' | 'pdf' | 'image' | 'video'
@@ -148,7 +149,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     pageOverview: 'none',
     dithering: fileType === 'pdf' ? 'atkinson' : 'floyd',
     is2bit: false,
-    contrast: fileType === 'pdf' ? 8 : 4,
+    contrast: getDefaultContrast(fileType),
     horizontalMargin: 0,
     verticalMargin: 0,
     orientation: (fileType === 'image' || fileType === 'video') ? 'portrait' : 'landscape',

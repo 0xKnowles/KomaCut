@@ -9,7 +9,7 @@ function PdfPage() {
   return (
     <ConverterPage
       fileType="pdf"
-      notice="At the moment PDF conversion uses the same processing as CBZ, with different options selection. Try Atkinson Max or Strong."
+      notice="PDF conversion uses the same processing as CBZ. Start with Atkinson and no contrast; increase contrast only for faded documents."
     />
   )
 }
