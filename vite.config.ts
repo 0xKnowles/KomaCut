@@ -1,8 +1,12 @@
 import { defineConfig } from 'vite'
+import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
 import devServer from '@hono/vite-dev-server'
 import { VitePWA } from 'vite-plugin-pwa'
+import { copyPdfJsWasmAssets } from './scripts/pdfjs-wasm'
+
+const projectRoot = import.meta.dirname
 
 export default defineConfig({
   plugins: [
@@ -19,6 +23,15 @@ export default defineConfig({
       ],
       injectClientScript: false,
     }),
+    {
+      name: 'pdfjs-wasm-assets',
+      async writeBundle(options) {
+        await copyPdfJsWasmAssets(
+          resolve(projectRoot, 'node_modules/pdfjs-dist/wasm'),
+          resolve(projectRoot, options.dir ?? 'dist', 'pdfjs/wasm'),
+        )
+      },
+    },
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png'],
@@ -50,6 +63,7 @@ export default defineConfig({
         ],
       },
       workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

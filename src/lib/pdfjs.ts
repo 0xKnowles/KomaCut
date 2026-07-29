@@ -2,6 +2,12 @@ type PdfData = ArrayBuffer | Uint8Array
 type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs')
 type PdfWorkerConstructor = new () => Worker
 
+export function getPdfJsWasmUrl(isDevelopment: boolean, baseUrl: string): string {
+  return isDevelopment ? '/node_modules/pdfjs-dist/wasm/' : `${baseUrl}pdfjs/wasm/`
+}
+
+export const PDFJS_WASM_URL = getPdfJsWasmUrl(import.meta.env.DEV, import.meta.env.BASE_URL ?? '/')
+
 let sharedWorker: Worker | null = null
 let workerDisabled = false
 let pdfJsModuleCache: PdfJsModule | null = null
@@ -94,6 +100,7 @@ export async function loadPdfDocument(data: PdfData) {
     return await pdfjsLib.getDocument({
       data: primaryBytes,
       disableWorker: !useWorker,
+      wasmUrl: PDFJS_WASM_URL,
     }).promise
   } catch (error) {
     if (!useWorker || !isRecoverableWorkerError(error)) {
@@ -105,6 +112,7 @@ export async function loadPdfDocument(data: PdfData) {
     return await pdfjsLib.getDocument({
       data: clonePdfBytes(data),
       disableWorker: true,
+      wasmUrl: PDFJS_WASM_URL,
     }).promise
   }
 }
