@@ -7,13 +7,21 @@ interface OptionsProps {
   fileType?: 'cbz' | 'pdf' | 'image' | 'video'
 }
 
+export function normalizeSplitModeForOrientation(
+  orientation: ConversionOptions['orientation'],
+  splitMode: ConversionOptions['splitMode']
+): ConversionOptions['splitMode'] {
+  return orientation === 'portrait' ? 'nosplit' : splitMode === 'fourway' ? 'overlap' : splitMode
+}
+
 export function Options({ options, onChange, fileType = 'cbz' }: OptionsProps) {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const isImageMode = fileType === 'image'
   const isVideoMode = fileType === 'video'
-  const supportsSplit = !isImageMode && !isVideoMode && options.orientation === 'landscape'
+  const supportsSplit = !isImageMode && !isVideoMode &&
+    (options.orientation === 'landscape' || fileType === 'pdf')
   const supportsCoverPortrait = !isImageMode && !isVideoMode && options.orientation === 'landscape'
-  const showPageOverview = supportsSplit &&
+  const showPageOverview = options.orientation === 'landscape' && supportsSplit &&
     options.splitMode !== 'nosplit' &&
     (fileType === 'cbz' || fileType === 'pdf')
 
@@ -31,9 +39,9 @@ export function Options({ options, onChange, fileType = 'cbz' }: OptionsProps) {
               className={options.device === 'X4' ? 'active' : ''}
               aria-pressed={options.device === 'X4'}
               onClick={() => onChange({ ...options, device: 'X4' })}
-              title="XTEink X4 (480 x 800)"
+              title="XTEink X4 / X4 Pro (480 x 800)"
             >
-              [X4]
+              [X4 / Pro]
             </button>
             <button
               type="button"
@@ -45,9 +53,6 @@ export function Options({ options, onChange, fileType = 'cbz' }: OptionsProps) {
               [X3]
             </button>
           </fieldset>
-          {options.device === 'X3' && (
-            <p className="device-warning">WARNING: Select only if you are using the X3 device.</p>
-          )}
         </div>
       </aside>
 
@@ -61,7 +66,14 @@ export function Options({ options, onChange, fileType = 'cbz' }: OptionsProps) {
           <select
             id="orientation"
             value={options.orientation}
-            onChange={(e) => onChange({ ...options, orientation: e.target.value as 'landscape' | 'portrait' })}
+            onChange={(e) => {
+              const orientation = e.target.value as 'landscape' | 'portrait'
+              onChange({
+                ...options,
+                orientation,
+                splitMode: normalizeSplitModeForOrientation(orientation, options.splitMode)
+              })
+            }}
           >
             <option value="landscape">Landscape</option>
             <option value="portrait">Portrait</option>
@@ -120,7 +132,7 @@ export function Options({ options, onChange, fileType = 'cbz' }: OptionsProps) {
               checked={options.is2bit}
               onChange={(e) => onChange({ ...options, is2bit: e.target.checked })}
             />
-            <span>2-bit grayscale (XTCH) - 4 gray levels, better shading, ~2x file size</span>
+            <span>2-bit grayscale (XTCH, experimental)</span>
           </label>
         </div>
 
@@ -150,10 +162,10 @@ export function Options({ options, onChange, fileType = 'cbz' }: OptionsProps) {
               value={options.splitMode}
               onChange={(e) => onChange({ ...options, splitMode: e.target.value as ConversionOptions['splitMode'] })}
             >
-              <option value="overlap">Overlapping thirds</option>
-              <option value="split">Split in half</option>
-              {fileType === 'pdf' && (
-                <option value="fourway">Split by columns (4-way)</option>
+              {options.orientation === 'landscape' && <option value="overlap">Overlapping thirds</option>}
+              {options.orientation === 'landscape' && <option value="split">Split in half</option>}
+              {fileType === 'pdf' && options.orientation === 'portrait' && (
+                <option value="fourway">Two-column paper (4 pages)</option>
               )}
               <option value="nosplit">No split</option>
             </select>
