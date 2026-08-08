@@ -2,14 +2,17 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   workflow_dispatch:
 
+# GITHUB_TOKEN needs pages:write to publish; contents:read to check out.
 permissions:
   contents: read
   pages: write
   id-token: write
 
+# A superseded run has nothing useful to publish, but let an in-flight deploy
+# finish rather than leaving Pages half-updated.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -18,48 +21,39 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Create redirect site
-        run: |
-          mkdir -p dist
-          cat > dist/index.html <<'EOF'
-          <!doctype html>
-          <html lang="en">
-            <head>
-              <meta charset="utf-8">
-              <meta http-equiv="refresh" content="0; url=https://xtcjs.app/">
-              <link rel="canonical" href="https://xtcjs.app/">
-              <title>Redirecting...</title>
-              <script>
-                (function () {
-                  window.location.replace("https://xtcjs.app/");
-                })();
-              </script>
-            </head>
-            <body>
-              <p>Redirecting to <a href="https://xtcjs.app/">xtcjs.app</a>...</p>
-            </body>
-          </html>
-          EOF
-          cp dist/index.html dist/404.html
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+      - run: bun install --frozen-lockfile
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - run: bun run test
+
+      - name: Build
+        run: bun run build
+        env:
+          # Project site: https://<owner>.github.io/<repo>/
+          BASE_PATH: /${{ github.event.repository.name }}/
+
+      - name: Add SPA fallback
+        # Pages has no rewrite rules, so a deep link like /KomaCut/pdf 404s.
+        # Serving the app shell as the 404 page lets the router recover it.
+        run: cp dist/index.html dist/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
   deploy:
+    needs: build
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v4

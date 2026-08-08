@@ -1,23 +1,17 @@
 {
-  "name": "xtcjs",
+  "name": "komacut",
   "version": "1.0.0",
-  "description": "Browser-based CBZ to XTC converter for XTEink X4",
+  "description": "Browser-based CBZ/CBR/PDF to XTC converter for KomaOS on the XTEink X4",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "test": "bun test",
-    "build:static": "VITE_API_URL=https://api.xtcjs.app/api vite build",
-    "preview": "vite preview",
-    "serve": "bun run server/index.ts",
-    "serve:api": "bun run server/api-only.ts"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@hono/vite-dev-server": "^0.24.1",
     "@tanstack/react-router": "^1.170.16",
-    "axios": "^1.18.0",
-    "hono": "^4.12.26",
     "jszip": "^3.10.1",
     "node-unrar-js": "^2.0.2",
     "pdf-lib": "^1.17.1",

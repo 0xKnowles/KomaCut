@@ -2,27 +2,24 @@ import { defineConfig } from 'vite'
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
-import devServer from '@hono/vite-dev-server'
 import { VitePWA } from 'vite-plugin-pwa'
 import { copyPdfJsWasmAssets } from './scripts/pdfjs-wasm'
 
 const projectRoot = import.meta.dirname
 
+// GitHub Pages serves a project site from /<repo>/, so every asset URL needs
+// that prefix. Override with BASE_PATH=/ when deploying to a user site or to
+// any host that serves from the root.
+const base = process.env.BASE_PATH ?? '/KomaCut/'
+
 export default defineConfig({
+  base,
   plugins: [
     TanStackRouterVite({
       target: 'react',
       autoCodeSplitting: true,
     }),
     react(),
-    devServer({
-      entry: 'server/dev.ts',
-      exclude: [
-        // Exclude everything except /api routes
-        /^(?!\/api).*/,
-      ],
-      injectClientScript: false,
-    }),
     {
       name: 'pdfjs-wasm-assets',
       async writeBundle(options) {
@@ -36,13 +33,15 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png'],
       manifest: {
-        name: 'XTC.js - CBZ & PDF to XTC Converter',
-        short_name: 'XTC.js',
-        description: 'Convert CBZ comics and PDF documents to XTC format for your XTEink X4 e-reader.',
+        name: 'KomaCut - CBZ & PDF to XTC Converter for KomaOS',
+        short_name: 'KomaCut',
+        description:
+          'Convert CBZ/CBR comics and PDFs to XTC for KomaOS on the XTEink X4, entirely in your browser.',
         theme_color: '#fafafa',
         background_color: '#fafafa',
         display: 'standalone',
-        start_url: '/',
+        start_url: base,
+        scope: base,
         icons: [
           {
             src: 'icon-192.png',
@@ -64,6 +63,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
+        // A volume's worth of XTC output dwarfs the default 2MB cap, and the
+        // pdf.js wasm bundles alone exceed it.
+        maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -83,23 +85,11 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
-          {
-            urlPattern: /^\/api\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              networkTimeoutSeconds: 5,
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
         ],
       },
     }),
   ],
   build: {
     outDir: 'dist',
-  },
-  ssr: {
-    external: ['bun:sqlite'],
   },
 })

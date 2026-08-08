@@ -8,7 +8,6 @@ import { Viewer } from './Viewer'
 import JSZip from 'jszip'
 import { convertToXtc } from '../lib/converter'
 import type { ConversionOptions } from '../lib/conversion/types'
-import { recordConversion } from '../lib/api'
 import { consumePendingFiles } from '../lib/file-transfer'
 import { useStoredResults, type StoredResult } from '../hooks/useStoredResults'
 import { extractXtcPages } from '../lib/xtc-reader'
@@ -272,8 +271,6 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
 
         // Store result immediately - progressive display
         await addResult(result)
-
-        recordConversion(fileType === 'image' || fileType === 'video' ? 'cbz' : fileType).catch(() => {})
       } catch (err) {
         console.error(`Error converting ${file.name}:`, err)
         const fallbackExtension = options.is2bit ? '.xtch' : '.xtc'

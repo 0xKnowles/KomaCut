@@ -1,6 +1,5 @@
 import { createRootRoute, Outlet, Link, useLocation } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { MangaSearch } from '../components/MangaSearch'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -8,7 +7,6 @@ export const Route = createRootRoute({
 
 function RootLayout() {
   const location = useLocation()
-  const [searchOpen, setSearchOpen] = useState(false)
   const [theme, setTheme] = useState(() => {
     if (typeof window === 'undefined') return 'light'
     return localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'
@@ -62,27 +60,15 @@ function RootLayout() {
               </svg>
             )}
           </button>
-          <button
-            type="button"
-            className="manga-search-trigger"
-            onClick={() => setSearchOpen(true)}
-            aria-label="Search manga"
-            title="Search manga on nyaa.si"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-          </button>
           <p className="tagline">
-            Optimized XTC Tools for your XTEink X4 · Support by starring on{' '}
+            XTC tools for KomaOS on the XTEink X4 · Forked from{' '}
             <a
               href="https://github.com/varo6/xtcjs"
               target="_blank"
               rel="noopener"
               style={{ color: 'inherit' }}
             >
-              GitHub
+              xtcjs
             </a>{' '}
             ♥
           </p>
@@ -130,15 +116,16 @@ function RootLayout() {
         <footer className="footer">
           <p>All processing happens in your browser · Your files never leave your device</p>
           <div className="footer-links">
-            <a href="https://github.com/varo6/xtcjs" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://github.com/0xKnowles/KomaCut" target="_blank" rel="noopener">GitHub</a>
             <span>·</span>
             <Link to="/about">About</Link>
             <span>·</span>
-            <a href="https://github.com/tazua/cbz2xtc" target="_blank" rel="noopener">Based on cbz2xtc</a>
+            <a href="https://github.com/0xKnowles/KomaOS" target="_blank" rel="noopener">KomaOS</a>
+            <span>·</span>
+            <a href="https://github.com/varo6/xtcjs" target="_blank" rel="noopener">Forked from xtcjs</a>
           </div>
         </footer>
       </main>
-      <MangaSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </>
   )
 }
