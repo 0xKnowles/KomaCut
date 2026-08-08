@@ -8,6 +8,12 @@ import { toGrayscale, applyContrast, calculateOverlapSegments, calculateFourWayS
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, getTargetDimensions } from './processing/canvas'
 import { imageDataToXtg, imageDataToXth } from './processing/xtg'
 import { buildXtcFromXtgPages } from './xtc-format'
+import {
+  geometryFor,
+  rotationToQuarterTurns,
+  SPLIT_GEOMETRY_MODES,
+  type SplitGeometry
+} from './xtc-geometry'
 import { extractPdfMetadata } from './metadata/pdf-outline'
 import { parseComicInfo } from './metadata/comicinfo'
 import { PageMappingContext, adjustTocForMapping } from './page-mapping'
@@ -27,6 +33,12 @@ const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.web
 interface ProcessedPage {
   name: string
   canvas: HTMLCanvasElement
+  /**
+   * Set on the first strip of a page that split, so the caller can record how
+   * the page was cut without re-deriving it. `leadingStrips` is filled in by
+   * the caller, which is the only place that knows what came before.
+   */
+  geometry?: SplitGeometry
 }
 
 interface EncodedPage {
@@ -284,13 +296,34 @@ function encodeCanvasPage(page: ProcessedPage, is2bit = false): EncodedPage {
   }
 }
 
+/**
+ * Picks the volume's geometry out of per-page records and resolves the lead-in.
+ *
+ * The first page that actually split describes the volume: the cover is forced
+ * to nosplit, so its geometry says nothing about the rest.
+ */
+function resolveSplitGeometry(
+  geometryByIndex: Array<SplitGeometry | undefined>,
+  stripsPerSourcePage: number[]
+): SplitGeometry | undefined {
+  let leadingStrips = 0
+  for (let i = 0; i < geometryByIndex.length; i++) {
+    const geometry = geometryByIndex[i]
+    if (geometry) return { ...geometry, leadingStrips: Math.min(leadingStrips, 0xff) }
+    leadingStrips += stripsPerSourcePage[i] ?? 0
+  }
+  return undefined
+}
+
 async function finalizeConversionResult(
   outputName: string,
   encodedPages: EncodedPage[],
   mappingCtx: PageMappingContext,
   metadata: BookMetadata,
   sampledPreviews: string[],
-  is2bit = false
+  is2bit = false,
+  splitGeometry?: SplitGeometry,
+  stripsPerSourcePage?: number[]
 ): Promise<ConversionResult> {
   encodedPages.sort((a, b) => a.name.localeCompare(b.name))
 
@@ -298,7 +331,12 @@ async function finalizeConversionResult(
     metadata.toc = adjustTocForMapping(metadata.toc, mappingCtx)
   }
 
-  const xtcData = await buildXtcFromXtgPages(encodedPages.map((page) => page.xtg), { metadata, is2bit })
+  const xtcData = await buildXtcFromXtgPages(encodedPages.map((page) => page.xtg), {
+    metadata,
+    is2bit,
+    splitGeometry,
+    stripsPerSourcePage
+  })
 
   return {
     name: is2bit ? outputName.replace(/\.xtc$/i, '.xtch') : outputName,
@@ -316,9 +354,18 @@ async function processArchiveSourcePages(
   getPageOptions: (index: number) => ConversionOptions,
   getOriginalPage: (index: number) => number,
   onProgress: (progress: number, previewUrl: string | null) => void
-): Promise<{ encodedPages: EncodedPage[]; mappingCtx: PageMappingContext; sampledPreviews: string[] }> {
+): Promise<{
+  encodedPages: EncodedPage[]
+  mappingCtx: PageMappingContext
+  sampledPreviews: string[]
+  splitGeometry?: SplitGeometry
+  stripsPerSourcePage: number[]
+}> {
   const sampledPreviews: string[] = []
   const pageResultsByIndex: EncodedPage[][] = new Array(totalPages)
+  // Pages are converted out of order across the pool, so geometry is kept by
+  // source index and the earliest split page picked afterwards.
+  const geometryByIndex: Array<SplitGeometry | undefined> = new Array(totalPages)
 
   let pool: ConvertWorkerPool | null = null
   let workerDisabled = false
@@ -356,8 +403,10 @@ async function processArchiveSourcePages(
 
       if (pool && !workerDisabled) {
         try {
-          const workerPages = await pool.processPage(pageNum, imgBlob, pageOptions, includePreview)
+          const batch = await pool.processPage(pageNum, imgBlob, pageOptions, includePreview)
+          const workerPages = batch.pages
           pageResults = workerPages.map((page) => ({ name: page.name, xtg: page.xtg }))
+          if (batch.geometry) geometryByIndex[index] = batch.geometry
 
           if (includePreview) {
             let previewBytes: Uint8Array | undefined
@@ -389,6 +438,8 @@ async function processArchiveSourcePages(
       if (pageResults.length === 0) {
         const pages = await processImage(imgBlob, pageNum, pageOptions)
         pageResults = pages.map((page) => encodeCanvasPage(page, pageOptions.is2bit))
+        const fallbackGeometry = pages.find((page) => page.geometry)?.geometry
+        if (fallbackGeometry) geometryByIndex[index] = fallbackGeometry
 
         if (includePreview && pages.length > 0 && pages[0].canvas) {
           const previewDataUrl = pages[0].canvas.toDataURL('image/jpeg', PREVIEW_JPEG_QUALITY)
@@ -419,13 +470,21 @@ async function processArchiveSourcePages(
 
   const mappingCtx = new PageMappingContext()
   const encodedPages: EncodedPage[] = []
+  const stripsPerSourcePage: number[] = []
   for (let i = 0; i < totalPages; i++) {
     const pages = pageResultsByIndex[i] || []
     mappingCtx.addOriginalPage(getOriginalPage(i), pages.length)
     encodedPages.push(...pages)
+    stripsPerSourcePage.push(pages.length)
   }
 
-  return { encodedPages, mappingCtx, sampledPreviews }
+  // The first page that actually split describes the volume: the cover is
+  // forced to nosplit, so its geometry says nothing about the rest. Pages in a
+  // volume are near enough uniform that one sample is the geometry, and the
+  // page-start map covers the pages that are not.
+  const splitGeometry = resolveSplitGeometry(geometryByIndex, stripsPerSourcePage)
+
+  return { encodedPages, mappingCtx, sampledPreviews, splitGeometry, stripsPerSourcePage }
 }
 
 /**
@@ -500,7 +559,7 @@ async function convertCbzToXtc(
   }
   moveCoverToFront(imageFiles, metadata)
 
-  const { encodedPages, mappingCtx, sampledPreviews } = await processArchiveSourcePages(
+  const { encodedPages, mappingCtx, sampledPreviews, splitGeometry, stripsPerSourcePage } = await processArchiveSourcePages(
     imageFiles.length,
     (index) => imageFiles[index].entry.async('blob'),
     (index) => getPageProcessingOptions(options, index === 0),
@@ -514,7 +573,9 @@ async function convertCbzToXtc(
     mappingCtx,
     metadata,
     sampledPreviews,
-    options.is2bit
+    options.is2bit,
+    splitGeometry,
+    stripsPerSourcePage
   )
 }
 
@@ -586,7 +647,7 @@ async function convertCbrToXtc(
   }
   moveCoverToFront(imageFiles, metadata)
 
-  const { encodedPages, mappingCtx, sampledPreviews } = await processArchiveSourcePages(
+  const { encodedPages, mappingCtx, sampledPreviews, splitGeometry, stripsPerSourcePage } = await processArchiveSourcePages(
     imageFiles.length,
     async (index) => new Blob([new Uint8Array(imageFiles[index].data)]),
     (index) => getPageProcessingOptions(options, index === 0),
@@ -600,7 +661,9 @@ async function convertCbrToXtc(
     mappingCtx,
     metadata,
     sampledPreviews,
-    options.is2bit
+    options.is2bit,
+    splitGeometry,
+    stripsPerSourcePage
   )
 }
 
@@ -753,6 +816,8 @@ async function convertVideoToXtc(
     const captureCtx = captureCanvas.getContext('2d', { willReadFrequently: true })!
 
     const encodedPages: EncodedPage[] = []
+    const stripsPerSourcePage: number[] = []
+    const geometryByIndex: Array<SplitGeometry | undefined> = []
     const sampledPreviews: string[] = []
     const mappingCtx = new PageMappingContext()
     const frameOptions = { ...options, splitMode: 'nosplit' as const }
@@ -768,6 +833,8 @@ async function convertVideoToXtc(
       const pages = processCanvasAsImage(captureCanvas, i + 1, frameOptions)
       encodedPages.push(...pages.map((page) => encodeCanvasPage(page, frameOptions.is2bit)))
       mappingCtx.addOriginalPage(i + 1, pages.length)
+      stripsPerSourcePage.push(pages.length)
+      geometryByIndex.push(pages.find((page) => page.geometry)?.geometry)
 
       const includePreview = sampledPreviews.length < MAX_STORED_PREVIEWS &&
         shouldGenerateSampledPreview(i + 1, frameCount)
@@ -786,7 +853,9 @@ async function convertVideoToXtc(
       mappingCtx,
       { toc: [] },
       sampledPreviews,
-      options.is2bit
+      options.is2bit,
+      resolveSplitGeometry(geometryByIndex, stripsPerSourcePage),
+      stripsPerSourcePage
     )
   } finally {
     URL.revokeObjectURL(url)
@@ -814,6 +883,8 @@ async function convertPdfToXtc(
   }
 
   const encodedPages: EncodedPage[] = []
+  const stripsPerSourcePage: number[] = []
+  const geometryByIndex: Array<SplitGeometry | undefined> = []
   const sampledPreviews: string[] = []
   const mappingCtx = new PageMappingContext()
   const numPages = pdf.numPages
@@ -836,6 +907,8 @@ async function convertPdfToXtc(
     const pages = processCanvasAsImage(canvas, i, options)
     encodedPages.push(...pages.map((page) => encodeCanvasPage(page, options.is2bit)))
     mappingCtx.addOriginalPage(i, pages.length)
+    stripsPerSourcePage.push(pages.length)
+    geometryByIndex.push(pages.find((page) => page.geometry)?.geometry)
 
     const includePreview = sampledPreviews.length < MAX_STORED_PREVIEWS &&
       shouldGenerateSampledPreview(i, numPages)
@@ -858,7 +931,9 @@ async function convertPdfToXtc(
     mappingCtx,
     metadata,
     sampledPreviews,
-    options.is2bit
+    options.is2bit,
+    resolveSplitGeometry(geometryByIndex, stripsPerSourcePage),
+    stripsPerSourcePage
   )
 }
 
@@ -921,7 +996,13 @@ function processCanvasAsImage(
     }
 
     if (options.splitMode === 'overlap') {
-      const segments = calculateOverlapSegments(width, height)
+      const segments = calculateOverlapSegments(width, height, options.device)
+      const overlapGeometry = geometryFor(
+        segments,
+        SPLIT_GEOMETRY_MODES.indexOf('overlap') as SplitGeometry['mode'],
+        0,
+        rotationToQuarterTurns(landscapeRotation),
+      )
       segments.forEach((seg, idx) => {
         const letter = String.fromCharCode(97 + idx)
         const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h, landscapeRotation)
@@ -929,6 +1010,7 @@ function processCanvasAsImage(
         applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
         results.push({
+          geometry: idx === 0 ? overlapGeometry : undefined,
           name: `${String(pageNum).padStart(4, '0')}_3_${letter}.png`,
           canvas: finalCanvas
         })
@@ -1068,7 +1150,13 @@ function processLoadedImage(
     }
 
     if (options.splitMode === 'overlap') {
-      const segments = calculateOverlapSegments(width, height)
+      const segments = calculateOverlapSegments(width, height, options.device)
+      const overlapGeometry = geometryFor(
+        segments,
+        SPLIT_GEOMETRY_MODES.indexOf('overlap') as SplitGeometry['mode'],
+        0,
+        rotationToQuarterTurns(landscapeRotation),
+      )
       segments.forEach((seg, idx) => {
         const letter = String.fromCharCode(97 + idx)
         const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h, landscapeRotation)
@@ -1076,6 +1164,7 @@ function processLoadedImage(
         applyDithering(finalCanvas.getContext('2d')!, targetWidth, targetHeight, options.dithering, options.is2bit)
 
         results.push({
+          geometry: idx === 0 ? overlapGeometry : undefined,
           name: `${String(pageNum).padStart(4, '0')}_3_${letter}.png`,
           canvas: finalCanvas
         })

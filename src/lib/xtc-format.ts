@@ -2,6 +2,12 @@
 
 import type { BookMetadata, TocEntry } from './metadata/types';
 import { imageDataToXtg } from './processing/xtg';
+import {
+  buildPageStartMap,
+  encodeSplitGeometry,
+  pageStartMapBytes,
+  type SplitGeometry,
+} from './xtc-geometry';
 
 interface ProcessedPage {
   name: string;
@@ -11,6 +17,16 @@ interface ProcessedPage {
 interface XtcBuildOptions {
   metadata?: BookMetadata;
   is2bit?: boolean;
+  /** Omitted for a file whose geometry is unknown; 0x28 is then zero. */
+  splitGeometry?: SplitGeometry;
+  /**
+   * Strips each source page produced, in order.
+   *
+   * Supplied when the strip count varies across the volume — a mid-book spread
+   * is landscape and emits one strip where its neighbours emit three — so a
+   * reader can find real page boundaries instead of assuming a fixed grouping.
+   */
+  stripsPerSourcePage?: number[];
 }
 
 // XTC format constants (based on reference file analysis)
@@ -88,7 +104,29 @@ export async function buildXtcFromXtgPages(
   const headerSize = hasMetadata ? HEADER_WITH_METADATA_SIZE : HEADER_BASE_SIZE;
   const metadataOffset = hasMetadata ? HEADER_WITH_METADATA_SIZE : 0;  // Points to title start
   const indexOffset = headerSize + metadataSize;
-  const dataOffset = indexOffset + (pageCount * INDEX_ENTRY_SIZE);
+
+  // The page-start map sits between the page table and the first page payload.
+  // Nothing in KomaOS requires dataOffset to follow the table immediately —
+  // payloads are found through each page table entry's own absolute offset
+  // (XtcParser.cpp:260), and dataOffset is only logged and used as a bound when
+  // scanning chapters (XtcParser.cpp:308). Putting the map here rather than
+  // before the table keeps it clear of that chapter scan, which derives its
+  // entry count from the gap up to pageTableOffset (XtcParser.cpp:305-318) and
+  // would otherwise read the map as extra chapter entries.
+  // The strip counts must account for every page in the file, or the map's bits
+  // would not line up with the page table it indexes. A page that failed to
+  // convert is dropped from the payload list without the caller's tally
+  // noticing, so this is checked rather than assumed.
+  const strips = options.stripsPerSourcePage;
+  const stripsCoverEveryPage =
+    strips !== undefined &&
+    strips.length > 0 &&
+    strips.reduce((sum, n) => sum + n, 0) === pageCount;
+  const pageStartMap = stripsCoverEveryPage ? buildPageStartMap(strips!) : null;
+
+  const mapOffset = indexOffset + (pageCount * INDEX_ENTRY_SIZE);
+  const mapSize = pageStartMap ? pageStartMapBytes(pageCount) : 0;
+  const dataOffset = mapOffset + mapSize;
 
   let totalSize = dataOffset;
   for (const blob of xtgBlobs) {
@@ -121,7 +159,19 @@ export async function buildXtcFromXtgPages(
   setBigUint64(view, 16, BigInt(metadataOffset));  // 0x10: Metadata offset (title start)
   setBigUint64(view, 24, BigInt(indexOffset));     // 0x18: Index offset
   setBigUint64(view, 32, BigInt(dataOffset));      // 0x20: Data offset
-  setBigUint64(view, 40, 0n);                      // 0x28: Reserved
+  // 0x28: packed split geometry. Upstream xtcjs wrote a zero here and called
+  // the field reserved, which left KomaOS guessing the overlap and the rotation
+  // when rebuilding a full page — the guess renders pages upside down with bad
+  // seams. See xtc-geometry.ts for the layout.
+  setBigUint64(
+    view,
+    40,
+    encodeSplitGeometry(
+      options.splitGeometry
+        ? { ...options.splitGeometry, hasPageStartMap: pageStartMap !== null }
+        : undefined,
+    ),
+  );
 
   // Write TOC entries offset at 0x30 (only when metadata present)
   if (hasMetadata) {
@@ -146,6 +196,10 @@ export async function buildXtcFromXtgPages(
     view.setUint16(entryOffset + 14, dimensions.height, true);
 
     relOffset += blob.byteLength;
+  }
+
+  if (pageStartMap) {
+    uint8.set(pageStartMap, mapOffset);
   }
 
   // Write page data

@@ -1,4 +1,5 @@
 import type { ConversionOptions } from './types'
+import type { SplitGeometry } from '../xtc-geometry'
 
 export interface WorkerProcessedPage {
   name: string
@@ -6,9 +7,22 @@ export interface WorkerProcessedPage {
   previewJpeg?: ArrayBuffer
 }
 
+/**
+ * One source page's output: its strips, and how they were cut.
+ *
+ * The strip count varies from page to page — a landscape spread is never split
+ * — so the caller needs it per page to build the page-start map, not just the
+ * flattened list of strips.
+ */
+export interface WorkerPageBatch {
+  pages: WorkerProcessedPage[]
+  geometry?: SplitGeometry
+}
+
 interface WorkerResponse {
   jobId: number
   pages?: WorkerProcessedPage[]
+  geometry?: SplitGeometry
   error?: string
 }
 
@@ -18,7 +32,7 @@ interface QueueJob {
   blob: Blob
   options: ConversionOptions
   includePreview: boolean
-  resolve: (pages: WorkerProcessedPage[]) => void
+  resolve: (batch: WorkerPageBatch) => void
   reject: (error: Error) => void
 }
 
@@ -58,7 +72,7 @@ export class ConvertWorkerPool {
         if (message.error) {
           job.reject(new Error(message.error))
         } else {
-          job.resolve(message.pages || [])
+          job.resolve({ pages: message.pages || [], geometry: message.geometry })
         }
 
         this.pump()
@@ -84,7 +98,7 @@ export class ConvertWorkerPool {
     blob: Blob,
     options: ConversionOptions,
     includePreview: boolean
-  ): Promise<WorkerProcessedPage[]> {
+  ): Promise<WorkerPageBatch> {
     if (this.isDestroyed) {
       return Promise.reject(new Error('Worker pool is destroyed'))
     }

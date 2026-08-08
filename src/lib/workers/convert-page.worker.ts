@@ -2,6 +2,7 @@ import { applyDithering } from '../processing/dithering'
 import { applyContrast, calculateFourWaySegments, calculateOverlapSegments, findContentBounds, shouldSplitPage, toGrayscale } from '../processing/image'
 import { imageDataToXtg, imageDataToXth } from '../processing/xtg'
 import type { ConversionOptions } from '../conversion/types'
+import { geometryFor, rotationToQuarterTurns, SPLIT_GEOMETRY_MODES, type SplitGeometry } from '../xtc-geometry'
 
 interface CropRect {
   x: number
@@ -27,6 +28,14 @@ interface WorkerPageResult {
 interface WorkerResponse {
   jobId: number
   pages?: WorkerPageResult[]
+  /**
+   * How this page was cut, when it was cut at all.
+   *
+   * `leadingStrips` is left at 0 here and filled in by the caller: it counts
+   * the strips emitted across every earlier page, which a worker handling one
+   * page in isolation cannot know.
+   */
+  geometry?: SplitGeometry
   error?: string
 }
 
@@ -220,9 +229,10 @@ async function processBitmap(
   pageNum: number,
   options: ConversionOptions,
   includePreview: boolean
-): Promise<WorkerPageResult[]> {
+): Promise<{ pages: WorkerPageResult[]; geometry?: SplitGeometry }> {
   const { width: targetWidth, height: targetHeight } = getTargetDimensions(options)
   const results: WorkerPageResult[] = []
+  let geometry: SplitGeometry | undefined
   const crop = getAxisCropRect(source.width, source.height, options)
 
   const baseCanvas = new OffscreenCanvas(crop.width, crop.height)
@@ -263,7 +273,7 @@ async function processBitmap(
       targetHeight,
       options.is2bit
     ))
-    return results
+    return { pages: results }
   }
 
   const landscapeRotation = options.landscapeFlipClockwise ? -90 : 90
@@ -284,7 +294,15 @@ async function processBitmap(
     }
 
     if (options.splitMode === 'overlap') {
-      const segments = calculateOverlapSegments(width, height)
+      const segments = calculateOverlapSegments(width, height, options.device)
+      // Measured off the segments themselves rather than recomputed, so the
+      // recorded overlap is the one the strips were actually cut with.
+      geometry = geometryFor(
+        segments,
+        SPLIT_GEOMETRY_MODES.indexOf('overlap') as SplitGeometry['mode'],
+        0,
+        rotationToQuarterTurns(landscapeRotation),
+      )
       for (let idx = 0; idx < segments.length; idx++) {
         const seg = segments[idx]
         const letter = String.fromCharCode(97 + idx)
@@ -397,7 +415,7 @@ async function processBitmap(
     ))
   }
 
-  return results
+  return { pages: results, geometry }
 }
 
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
@@ -406,14 +424,14 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   try {
     const bitmap = await createImageBitmap(blob)
     try {
-      const pages = await processBitmap(bitmap, pageNum, options, includePreview)
+      const { pages, geometry } = await processBitmap(bitmap, pageNum, options, includePreview)
       const transferables: Transferable[] = []
       for (const page of pages) {
         transferables.push(page.xtg)
         if (page.previewJpeg) transferables.push(page.previewJpeg)
       }
 
-      const response: WorkerResponse = { jobId, pages }
+      const response: WorkerResponse = { jobId, pages, geometry }
       ;(self as any).postMessage(response, transferables)
     } finally {
       bitmap.close()
