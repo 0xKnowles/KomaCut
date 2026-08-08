@@ -147,7 +147,9 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     device: 'X4',
     splitMode: (fileType === 'image' || fileType === 'video') ? 'nosplit' : 'overlap',
     pageOverview: 'none',
-    dithering: fileType === 'pdf' ? 'atkinson' : 'floyd',
+    // Floyd-Steinberg for PDFs too: most manga PDFs are scanned art, not text,
+    // and Atkinson's sparser error diffusion loses tone in screentones.
+    dithering: 'floyd',
     is2bit: false,
     contrast: getDefaultContrast(fileType),
     horizontalMargin: 0,

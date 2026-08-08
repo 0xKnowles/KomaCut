@@ -9,7 +9,7 @@ function PdfPage() {
   return (
     <ConverterPage
       fileType="pdf"
-      notice="PDF conversion uses the same processing as CBZ. Start with Atkinson and no contrast; increase contrast only for faded documents."
+      notice="PDF conversion uses the same processing as CBZ, and the defaults assume scanned manga. For a text document, switch dithering to Atkinson and drop contrast to 0."
     />
   )
 }
