@@ -1,13 +1,15 @@
 :root {
-  /* Paper & ink palette */
-  --paper: #f8f4eb;
-  --paper-dark: #ece5d8;
-  --ink: #1e1a17;
-  --ink-light: #504941;
-  --ink-faded: #746c63;
-  --accent: #b53a2b;
-  --accent-hover: #963023;
-  --success: #2f713f;
+  /* E-ink palette: cool, high-contrast monochrome, because that is what the
+     device this targets actually renders. Deliberately not upstream xtcjs's
+     warm paper-and-rust scheme -- a fork should not be mistaken for it. */
+  --paper: #f2f4f6;
+  --paper-dark: #dfe3e8;
+  --ink: #0c0e11;
+  --ink-light: #3d444d;
+  --ink-faded: #6e7781;
+  --accent: #2f5bea;
+  --accent-hover: #1d43ba;
+  --success: #1a7f5a;
 
   /* Z-index scale */
   --z-base: 1;
@@ -17,9 +19,9 @@
   --z-grain: 400;
 
   /* Typography */
-  --font-display: 'Libre Franklin', system-ui, sans-serif;
-  --font-serif: 'Instrument Serif', Georgia, serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-serif: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
   /* Spacing */
   --space-xs: 0.25rem;
@@ -36,14 +38,14 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --paper: #191714;
-  --paper-dark: #28241f;
-  --ink: #f7f0e5;
-  --ink-light: #d8cec0;
-  --ink-faded: #aaa094;
-  --accent: #ff715f;
-  --accent-hover: #ff917f;
-  --success: #7fc990;
+  --paper: #0d1014;
+  --paper-dark: #171c22;
+  --ink: #eef2f6;
+  --ink-light: #c2cad3;
+  --ink-faded: #8b95a1;
+  --accent: #7c9bff;
+  --accent-hover: #9db4ff;
+  --success: #4fc79b;
 }
 
 *,
@@ -69,14 +71,31 @@ body {
   line-height: 1.5;
 }
 
-/* Paper grain overlay */
+/* Halftone overlay
+   A dot screen rather than upstream's paper grain: this tool's whole job is
+   turning continuous tone into a 1-bit dither, so the texture is the output.
+   Kept faint enough not to fight the content it sits over. */
 .grain {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  opacity: 0.18;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  opacity: 0.05;
+  background-image: radial-gradient(var(--ink) 0.5px, transparent 0.6px);
+  background-size: 4px 4px;
   z-index: var(--z-grain);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .grain {
+    /* The screen shifts by exactly one cell, so the pattern stays aligned. */
+    animation: halftone-drift 24s steps(4) infinite;
+  }
+}
+
+@keyframes halftone-drift {
+  to {
+    background-position: 4px 4px;
+  }
 }
 
 /* Layout */
@@ -132,34 +151,70 @@ body {
 
 /* Header */
 .header {
+  position: relative;
   text-align: center;
   padding-bottom: var(--space-lg);
   border-bottom: var(--border);
 }
 
-.logo {
-  font-family: var(--font-display);
-  font-size: clamp(2.5rem, 8vw, 4rem);
-  font-weight: 900;
-  letter-spacing: -0.03em;
-  line-height: 1;
+/* Anchored to the header rather than the page, and flush right now that the
+   search button it used to sit beside is gone. */
+.theme-toggle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: center;
+  background: none;
+  border: var(--border-light);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.logo-xtc {
+.theme-toggle:hover {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+.theme-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.logo {
+  font-family: var(--font-display);
+  font-size: clamp(2.25rem, 7.5vw, 3.5rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+}
+
+.logo-koma {
   color: var(--ink);
 }
 
-.logo-dot {
-  color: var(--accent);
-  font-size: 1.3em;
-  line-height: 0;
+/* The cut itself: this tool slices a page into strips, and the rule sits in
+   the wordmark where the blade would go. */
+.logo-cut-rule {
+  width: 2px;
+  align-self: stretch;
+  margin: 0 0.34em;
+  background: var(--accent);
+  transform: skewX(-12deg);
 }
 
-.logo-js {
+.logo-cut {
   color: var(--ink-light);
+  font-weight: 400;
 }
 
 .tagline {
@@ -367,14 +422,16 @@ body {
   margin-bottom: var(--space-md);
 }
 
+/* Echoes the cut rule in the wordmark, so section marks read as the same idea. */
 .section-header h2::before {
   content: '';
   display: inline-block;
-  width: 1rem;
-  height: 2px;
+  width: 2px;
+  height: 0.85rem;
   margin-right: var(--space-sm);
   vertical-align: middle;
   background: var(--accent);
+  transform: skewX(-12deg);
 }
 
 .section-header h2 {

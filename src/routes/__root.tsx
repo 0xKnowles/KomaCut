@@ -31,9 +31,9 @@ function RootLayout() {
       <main className="layout">
         <header className="header">
           <div className="logo">
-            <span className="logo-xtc">XTC</span>
-            <span className="logo-dot">.</span>
-            <span className="logo-js">js</span>
+            <span className="logo-koma">Koma</span>
+            <span className="logo-cut-rule" aria-hidden="true" />
+            <span className="logo-cut">Cut</span>
           </div>
           <button
             type="button"

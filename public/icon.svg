@@ -1,5 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="64" fill="#1a1817"/>
-  <text x="256" y="290" text-anchor="middle" font-family="system-ui, sans-serif" font-weight="900" font-size="220" fill="#fafafa">XTC</text>
-  <text x="256" y="400" text-anchor="middle" font-family="monospace" font-weight="500" font-size="80" fill="#c23c2a">.js</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="KomaCut">
+  <!-- A manga page cut into the three overlapping strips this tool emits. -->
+  <rect width="512" height="512" rx="96" fill="#0c0e11"/>
+  <g transform="translate(146 84)">
+    <rect width="220" height="344" rx="10" fill="#f2f4f6"/>
+    <!-- The two cuts, skewed to match the wordmark's cut rule. -->
+    <g stroke="#2f5bea" stroke-width="14" stroke-linecap="square">
+      <path d="M-16 130 L236 106"/>
+      <path d="M-16 250 L236 226"/>
+    </g>
+  </g>
 </svg>
