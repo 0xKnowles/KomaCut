@@ -8,9 +8,9 @@ function AboutPage() {
   return (
     <div className="about-page">
       <section className="content-section">
-        <h1>About XTC.js</h1>
+        <h1>About KomaCut</h1>
         <p>
-          XTC.js is a free, browser-based converter that transforms your CBZ comic archives and PDF documents
+          KomaCut is a free, browser-based converter that transforms your CBZ comic archives and PDF documents
           into XTC format, optimized for the <strong>XTEink X4 e-reader</strong>. 
           It runs entirely in your browser — your files never leave your device, ensuring complete privacy.
         </p>
@@ -52,7 +52,7 @@ function AboutPage() {
         <h2>Frequently Asked Questions</h2>
         <details className="faq-item">
           <summary>Is my data safe?</summary>
-          <p>Yes. XTC.js processes everything in your browser using JavaScript. Your files are never uploaded to any server. You can even use this tool offline once the page is loaded.</p>
+          <p>Yes. KomaCut processes everything in your browser using JavaScript. Your files are never uploaded to any server. You can even use this tool offline once the page is loaded.</p>
         </details>
         <details className="faq-item">
           <summary>What dithering algorithm should I use?</summary>
@@ -60,18 +60,18 @@ function AboutPage() {
         </details>
         <details className="faq-item">
           <summary>Why are my pages split in half?</summary>
-          <p>The XTEink X4 has a portrait display (480×800). When you upload a landscape image (like a two-page spread), XTC.js automatically splits it into two pages for optimal reading.</p>
+          <p>The XTEink X4 has a portrait display (480×800). When you upload a landscape image (like a two-page spread), KomaCut automatically splits it into two pages for optimal reading.</p>
         </details>
         <details className="faq-item">
           <summary>Can I use this on mobile?</summary>
-          <p>Yes! XTC.js works on any modern browser, including mobile devices. However, converting large files may be slower on phones due to limited processing power.</p>
+          <p>Yes! KomaCut works on any modern browser, including mobile devices. However, converting large files may be slower on phones due to limited processing power.</p>
         </details>
       </section>
 
       <section className="content-section">
         <h2>Privacy Policy</h2>
         <p>
-          XTC.js does not collect, store, or transmit any personal data. All file processing occurs locally
+          KomaCut does not collect, store, or transmit any personal data. All file processing occurs locally
           in your browser. No cookies are used for tracking. Google AdSense may use cookies for ad
           personalization — see Google's privacy policy for details.
         </p>

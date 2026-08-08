@@ -1,157 +1,119 @@
-# XTC.js 📚
+# KomaCut 📚
 
-**Read manga and comics on your XTEink X4 e-reader!**
+**Convert manga and comics for [KomaOS](https://github.com/0xKnowles/KomaOS) on the XTEink X4.**
 
 <p align="center">
-  <a href="https://xtcjs.app">
-    <img src="https://img.shields.io/badge/demo-xtcjs.app-0891b2?style=flat&logo=googlechrome&logoColor=white" alt="Live Demo" />
-  </a>
-    <img src="https://img.shields.io/badge/users-10k+-22c55e?style=flat&logo=starship&logoColor=white" alt="Users" />
     <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white" alt="TypeScript" />
     <img src="https://img.shields.io/badge/Bun-000000?style=flat&logo=bun&logoColor=white" alt="Bun" />
     <img src="https://img.shields.io/badge/license-MIT-22c55e?style=flat" alt="License" />
 </p>
 
-<p align="center">
-  <sub>Made with ❤️ by <a href="https://github.com/varo6">varo6</a> & <a href="https://github.com/sodafmr">sodaFMR</a></sub>
-</p>
+A fork of [xtcjs](https://github.com/varo6/xtcjs) by
+[varo6](https://github.com/varo6) & [sodaFMR](https://github.com/sodafmr),
+tailored for KomaOS and built to run entirely in the browser with no server
+behind it. Everything upstream does — CBZ/CBR, PDF, images, video, merge/split,
+metadata — still works; what changed is what ends up in the file's header.
 
+## Which firmware does this target?
 
-A free, privacy-first web app that converts your CBZ comics, PDFs, images, and videos into XTC format optimized for the XTEink X4 and X3 e-readers.
+KomaCut writes XTC for **[KomaOS](https://github.com/0xKnowles/KomaOS)**, a
+manga-focused fork of CrossPoint Reader for the XTEink X4 (ESP32-C3).
 
-**[Try it now!](https://xtcjs.app)** — No installation required
+Its output is still an ordinary XTC file. Stock firmware and upstream xtcjs read
+it exactly as they always did — the additions below live in header bits and a
+region those readers never look at. You do **not** need KomaOS to use KomaCut,
+but the extra information only means something there.
 
+## What this fork changes
 
+### Split geometry is recorded, not guessed
 
-##  Features
+The container header's qword at `0x28` is not reserved. KomaOS reads it as
+packed split geometry, and so does [FlipNzb](https://github.com/0xKnowles/FlipNzb);
+upstream xtcjs wrote a zero there.
 
-### 📥 Convert Anything
+Without it, a reader rebuilding a full page from strips has to guess two things
+it cannot recover from the file: the **overlap**, which follows from the original
+page's aspect ratio that conversion consumes, and the **rotation**, which is
+baked into the stored pixels with nothing left to say which way it went. Both
+guesses are wrong in ways that look like a bad scan — pages upside down, seams
+in the wrong place.
 
-| Format | What it's for |
-|--------|---------------|
-|  **CBZ/CBR** | Manga and comic archives |
-|  **PDF** | Documents, scanned manga, books |
-|  **Images** | JPG, PNG, WEBP for wallpapers and covers |
-|  **More** | More Extra Options! |
+KomaCut records both. The overlap is measured off the strips the page was
+actually cut with rather than recomputed, because the segment formula floors its
+shift and a second derivation can land a pixel out. The rotation is taken from
+the **Flip landscape** option instead of being assumed, since this converter
+rotates either way.
 
-### ⚡ Optimized for E-Ink
-
-Your content is automatically processed for the best e-ink reading experience:
-
--  **Smart Dithering** — Floyd-Steinberg, Atkinson, Sierra-Lite, or Ordered
--  **Contrast Enhancement** — Make text and art crisp on grayscale displays  
--  **Auto Page Splitting** — Two-page spreads become individual pages
--  **Perfect Sizing** — Every page fits 480×800 (X4) or 528×792 (X3)
-
-### 🔧 Merge & Split Tools
-
--  **Merge** — Combine multiple CBZ, PDF, or XTC files into one
--  **Split** — Break large files by page ranges or equal chunks
--  **Chain Workflows** — Split, then convert parts to XTC in one flow
-
-### 📝 Metadata Editor
-
-- Add title, author, and chapter information to XTC files
-- Create table of contents for easy navigation on your e-reader
-
-
-##  Why XTC.js?
-
-| | |
+| bits | field |
 |---|---|
-| 🔒 **100% Private** | Everything runs in your browser. Your files never leave your device. |
-| 📴 **Works Offline** | Once loaded, use it anywhere without internet. |
-| 🎫 **No Account** | Just drop your files and convert. Zero friction. |
-| 👁️ **Live Preview** | See exactly how pages will look before downloading. |
+| 0–7 | `mode` (index into the mode table; 0 = not recorded) |
+| 8–15 | `stripsPerPage` |
+| 16–31 | `overlapPerMille` |
+| 32–33 | `rotationQuarterTurns` (1 = one clockwise turn) |
+| 34 | page-start map present |
+| 40–47 | `leadingStrips` |
 
+### A page-start map, for volumes that are not uniform
 
+`leadingStrips` describes front matter only, so it cannot express a **mid-book
+double-page spread**. A spread is landscape, so it is never split: it emits one
+strip where its neighbours emit three. A reader grouping strips in threes is out
+of phase from there to the end of the volume. (KomaOS has a manual *Slice Offset*
+setting as a stopgap; a file with this map does not need it.)
 
-##  Quick Start
+KomaCut writes one bit per strip, set where each source page begins. It lives
+immediately after the page table, is `ceil(pageCount / 8)` bytes — about 75 for
+a 200-page volume — and is announced by bit 34 above.
 
-1. Open [xtcjs.app](https://xtcjs.app) in your browser
-2. Drop your CBZ, PDF, or image files
-3. Adjust settings (defaults work great)
-4. Convert and watch the live preview
-5. Download your XTC file
-6. Transfer to your XTEink device
+Bit 34 rather than a version bump is deliberate: KomaOS's parser accepts only
+versions 1.0 and 0.1, so a 1.1 file would be **rejected outright** by every
+build in the field. A file whose extra bitmap is ignored is strictly better than
+one that will not open.
 
----
+### Overlap strips are cut for the device you picked
 
-## Recommended Settings
+`calculateOverlapSegments` hardcoded the X4's 800×480 panel while the rest of the
+pipeline honoured the device selector, so every **X3** conversion was cut for the
+wrong screen. The X3 is wider, so its strip is about 11% taller: on a 1114×1600
+scan the strip should be 742px and was 668px. The strips still rendered,
+letterboxed, but every seam sat in the wrong place.
 
-### 📖 Manga & Comics
-| Setting | Value |
-|---------|-------|
-| Dithering | Floyd-Steinberg |
-| Contrast | Medium |
-| Split | Overlapping thirds |
-| Orientation | Landscape |
+### Removed
 
-### 📄 PDFs & Documents
-| Setting | Value |
-|---------|-------|
-| Dithering | Atkinson |
-| Contrast | Strong / Maximum |
-| Orientation | Landscape |
+The upstream hono server, its Cloudflare/Docker deployment, conversion
+telemetry, and the nyaa.si search proxy — all of which need a backend this
+build does not have.
 
-### 🖼️ Wallpapers & Covers
-| Setting | Value |
-|---------|-------|
-| Image Scaling | Cover |
-| Orientation | Portrait |
-| Dithering | Floyd-Steinberg |
-
----
-
-## ❓ FAQ
-
-<details>
-<summary><b>Which dithering algorithm should I use?</b></summary>
-
-- **Floyd-Steinberg** — Best all-rounder for manga with detailed art
-- **Atkinson** — Sharper results, great for text-heavy content
-- **Sierra-Lite** — Lighter dithering, good for high-contrast art
-- **Ordered** — Patterned dithering, retro look
-- **None** — Pure black and white, no gradients
-</details>
-
-<details>
-<summary><b>Why are my pages split in half?</b></summary>
-
-The XTEink X4 has a portrait screen. When you convert landscape images (like two-page manga spreads), XTC.js splits them so you can read each page comfortably. Use "No split" if you prefer full spreads. PDFs also support a "Split by columns (4-way)" option for two-column layouts.
-</details>
-
-<details>
-<summary><b>Can I use this on my phone?</b></summary>
-
-Yes! XTC.js works on any modern browser. Large files may convert slower on mobile due to limited processing power.
-</details>
-
-<details>
-<summary><b>What's the XTC format?</b></summary>
-
-XTC is the native format for XTEink e-readers. It contains optimized 1-bit black and white images at the device's resolution, designed for fast page turns and excellent readability.
-</details>
-
-<details>
-<summary><b>Is there an XTCH format?</b></summary>
-
-XTCH is the 2-bit variant with 4 grayscale levels instead of pure black and white. Some content may look better in XTCH.
-</details>
-
----
-
-## 🙏 Credits
-
-The idea was originally from [cbz2xtc](https://github.com/tazua/cbz2xtc), after porting to typescript, the app gained lots of functionalities maintained by [varo6](https://github.com/varo6) & [sodafmr](https://github.com/sodafmr).
-
----
-
-## 🛠️ Development
+## Development
 
 ```bash
 bun install      # Install dependencies
 bun run dev      # Dev server → localhost:5173
-bun run build    # Production build
-bun run serve    # Production server → localhost:3000
+bun run test     # Unit tests
+bun run build    # Production build → dist/
 ```
+
+The build is fully static. `BASE_PATH` sets the path the app is served from and
+defaults to `/KomaCut/` for GitHub Pages; use `BASE_PATH=/ bun run build` when
+serving from a domain root.
+
+## Recommended settings for KomaOS
+
+| Setting | Value |
+|---------|-------|
+| Device | X4 |
+| Split | Overlapping thirds |
+| Orientation | Landscape |
+| Dithering | Floyd-Steinberg |
+| Contrast | Medium |
+
+Read the result in KomaOS's **Full** view: that is the mode that reassembles the
+strips into whole pages, and the mode the header fields above exist to serve.
+
+## Credits
+
+Everything here rests on [xtcjs](https://github.com/varo6/xtcjs) by
+[varo6](https://github.com/varo6) and [sodaFMR](https://github.com/sodafmr),
+which in turn began as a port of [cbz2xtc](https://github.com/tazua/cbz2xtc) by
+[tazua](https://github.com/tazua). MIT licensed, as is this fork.
