@@ -1,5 +1,7 @@
 // Image processing functions for manga optimization
 
+import { getTargetDimensions, type TargetDevice } from './canvas'
+
 interface ContentBounds {
   x: number
   y: number
@@ -92,13 +94,22 @@ export function applyContrast(
 
 /**
  * Calculate overlapping segments for tall manga pages
+ *
+ * The strip height is whatever fills the screen once the page is scaled to the
+ * panel's long edge, so it depends on the panel: the X3 is wider than the X4
+ * and takes a taller strip. This used to hardcode the X4's 800x480 while the
+ * rest of the pipeline honoured `options.device`, which left every X3
+ * conversion cut for the wrong screen — an X3 strip is ~11% taller, so the
+ * strips were scaled down and every seam sat in the wrong place.
  */
 export function calculateOverlapSegments(
   width: number,
-  height: number
+  height: number,
+  device: TargetDevice = 'X4'
 ): Array<{ x: number; y: number; w: number; h: number }> {
-  const scale = 800 / width;
-  const segmentHeight = Math.floor(480 / scale);
+  const panel = getTargetDimensions(device);
+  const scale = panel.height / width;
+  const segmentHeight = Math.floor(panel.width / scale);
 
   let numSegments = 3;
   let shift = 0;
